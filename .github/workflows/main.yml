@@ -39,7 +39,6 @@ jobs:
 
           if [ -z "$ROOT" ]; then
             echo "ERROR: gradlew not found inside ZIP!"
-            find project -maxdepth 5 -type f | head -200
             exit 1
           fi
 
@@ -70,28 +69,21 @@ jobs:
         run: |
           yes | sdkmanager --licenses || true
 
-      - name: Show Project
+      - name: Make Gradle executable
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "================================"
-          echo "Project Root:"
-          pwd
-          echo "================================"
+          chmod +x gradlew
+          ls -l gradlew
 
-          echo "Files:"
-          ls -la
-
-          echo "================================"
-          echo "Gradle Version:"
+      - name: Show Gradle Version
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
           ./gradlew --version
 
       - name: Build Release APK
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          chmod +x gradlew
-
           ./gradlew clean
-
           ./gradlew assembleRelease --stacktrace
 
       - name: Find APK
