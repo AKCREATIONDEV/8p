@@ -27,7 +27,7 @@ jobs:
             exit 1
           fi
 
-          echo "ZIP: $ZIP"
+          echo "ZIP found: $ZIP"
 
           unzip -q "$ZIP" -d project
 
@@ -44,10 +44,10 @@ jobs:
 
           ROOT=$(dirname "$ROOT")
 
-          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
-
-          echo "Project root:"
+          echo "Original project root:"
           echo "$ROOT"
+
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
       - name: Setup Java 17
         uses: actions/setup-java@v5
@@ -69,34 +69,82 @@ jobs:
         run: |
           yes | sdkmanager --licenses || true
 
-      - name: Make Gradle executable
-        working-directory: ${{ env.PROJECT_ROOT }}
+      - name: Prepare Build Directory
+        run: |
+          BUILD_ROOT="$RUNNER_TEMP/android_project"
+
+          rm -rf "$BUILD_ROOT"
+          mkdir -p "$BUILD_ROOT"
+
+          cp -a "${{ env.PROJECT_ROOT }}/." "$BUILD_ROOT/"
+
+          echo "BUILD_ROOT=$BUILD_ROOT" >> "$GITHUB_ENV"
+
+          echo "Build project:"
+          echo "$BUILD_ROOT"
+
+      - name: Verify Native Build Files
+        run: |
+          echo "Checking Android.mk..."
+
+          if [ ! -f "$BUILD_ROOT/app/src/main/jni/Android.mk" ]; then
+            echo "ERROR: Android.mk not found!"
+            exit 1
+          fi
+
+          if [ ! -f "$BUILD_ROOT/app/src/main/jni/Application.mk" ]; then
+            echo "ERROR: Application.mk not found!"
+            exit 1
+          fi
+
+          echo "Android.mk:"
+          ls -l "$BUILD_ROOT/app/src/main/jni/Android.mk"
+
+          echo "Application.mk:"
+          ls -l "$BUILD_ROOT/app/src/main/jni/Application.mk"
+
+          echo "Native directory:"
+          ls -la "$BUILD_ROOT/app/src/main/jni"
+
+      - name: Make Gradle Executable
+        working-directory: ${{ env.BUILD_ROOT }}
         run: |
           chmod +x gradlew
           ls -l gradlew
 
       - name: Show Gradle Version
-        working-directory: ${{ env.PROJECT_ROOT }}
+        working-directory: ${{ env.BUILD_ROOT }}
         run: |
           ./gradlew --version
 
-      - name: Build Release APK
-        working-directory: ${{ env.PROJECT_ROOT }}
+      - name: Clean
+        working-directory: ${{ env.BUILD_ROOT }}
         run: |
-          ./gradlew clean
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew clean --stacktrace
+
+      - name: Build Release APK
+        working-directory: ${{ env.BUILD_ROOT }}
+        run: |
+          ./gradlew assembleRelease --stacktrace --info
 
       - name: Find APK
         id: find_apk
         run: |
-          APK=$(find "${{ env.PROJECT_ROOT }}" \
+          APK=$(find "$BUILD_ROOT" \
             -type f \
             -name "*.apk" \
             -path "*/build/outputs/*" \
             -print -quit)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK not found!"
+            echo "ERROR: APK was not generated!"
+
+            echo "Searching build outputs..."
+            find "$BUILD_ROOT" \
+              -type f \
+              -path "*/build/outputs/*" \
+              -print
+
             exit 1
           fi
 
