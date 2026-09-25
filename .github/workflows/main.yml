@@ -1,4 +1,4 @@
-name: Android Build
+name: Build Android
 
 on:
   push:
@@ -11,117 +11,111 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Extract Project ZIP
+        run: |
+          mkdir -p project
+
+          ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" \
+            ! -path "./.git/*" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: ZIP file not found!"
+            exit 1
+          fi
+
+          echo "ZIP: $ZIP"
+
+          unzip -q "$ZIP" -d project
+
+          ROOT=$(find project \
+            -type f \
+            -name gradlew \
+            -not -path "*/.gradle/*" \
+            -print -quit)
+
+          if [ -z "$ROOT" ]; then
+            echo "ERROR: gradlew not found inside ZIP!"
+            find project -maxdepth 5 -type f | head -200
+            exit 1
+          fi
+
+          ROOT=$(dirname "$ROOT")
+
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+          echo "Project root:"
+          echo "$ROOT"
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Install Android SDK and NDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
 
-      - name: Install required SDK/NDK
+      - name: Install Android SDK 34 and NDK
         run: |
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-34"
           sdkmanager "build-tools;34.0.0"
           sdkmanager "ndk;24.0.8215888"
 
-      - name: Accept Android licenses
+      - name: Accept Android Licenses
         run: |
           yes | sdkmanager --licenses || true
 
-      - name: Find project ZIP
-        id: find_zip
-        shell: bash
+      - name: Show Project
+        working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          ZIP=$(find . -maxdepth 3 -type f -iname "*.zip" \
-            ! -path "./.git/*" | head -n 1)
+          echo "================================"
+          echo "Project Root:"
+          pwd
+          echo "================================"
 
-          if [ -z "$ZIP" ]; then
-            echo "No project ZIP found."
-            exit 1
-          fi
-
-          echo "ZIP found: $ZIP"
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
-
-      - name: Extract project
-        run: |
-          rm -rf "$RUNNER_TEMP/android-project"
-          mkdir -p "$RUNNER_TEMP/android-project"
-
-          unzip -q "${{ steps.find_zip.outputs.zip }}" \
-            -d "$RUNNER_TEMP/android-project"
-
-      - name: Find Gradle project automatically
-        id: find_project
-        shell: bash
-        run: |
-          PROJECT_ROOT=$(find "$RUNNER_TEMP/android-project" \
-            -type f -name "gradlew" \
-            -not -path "*/.gradle/*" \
-            -print -quit | xargs -r dirname)
-
-          if [ -z "$PROJECT_ROOT" ] || [ ! -f "$PROJECT_ROOT/gradlew" ]; then
-            echo "Could not find Gradle project."
-            echo "Searching extracted files:"
-            find "$RUNNER_TEMP/android-project" -maxdepth 5 -type f | head -200
-            exit 1
-          fi
-
-          PROJECT_ROOT=$(cd "$PROJECT_ROOT" && pwd)
-
-          echo "Gradle project found:"
-          echo "$PROJECT_ROOT"
-
-          echo "project_root=$PROJECT_ROOT" >> "$GITHUB_OUTPUT"
-
-      - name: Make Gradle executable
-        working-directory: ${{ steps.find_project.outputs.project_root }}
-        run: chmod +x gradlew
-
-      - name: Show project information
-        working-directory: ${{ steps.find_project.outputs.project_root }}
-        run: |
-          echo "===== Gradle version ====="
-          ./gradlew --version
-
-          echo "===== Project files ====="
+          echo "Files:"
           ls -la
 
+          echo "================================"
+          echo "Gradle Version:"
+          ./gradlew --version
+
       - name: Build Release APK
-        working-directory: ${{ steps.find_project.outputs.project_root }}
+        working-directory: ${{ env.PROJECT_ROOT }}
         run: |
+          chmod +x gradlew
+
+          ./gradlew clean
+
           ./gradlew assembleRelease --stacktrace
 
-      - name: Find generated APK
-        id: apk
-        shell: bash
+      - name: Find APK
+        id: find_apk
         run: |
-          APK=$(find "${{ steps.find_project.outputs.project_root }}" \
+          APK=$(find "${{ env.PROJECT_ROOT }}" \
             -type f \
             -name "*.apk" \
             -path "*/build/outputs/*" \
             -print -quit)
 
           if [ -z "$APK" ]; then
-            echo "APK was not generated."
+            echo "ERROR: APK not found!"
             exit 1
           fi
 
           echo "APK found:"
           echo "$APK"
 
-          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "APK=$APK" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Android-Release
-          path: ${{ steps.apk.outputs.apk }}
+          name: Android-Release-APK
+          path: ${{ env.APK }}
           if-no-files-found: error
